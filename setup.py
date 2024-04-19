@@ -7,7 +7,7 @@ def readme():
         return f.read()
 
 
-version = os.environ.get('CI_COMMIT_TAG', f"1.0.{os.environ['CI_JOB_ID']}")
+version = os.environ.get('CI_COMMIT_TAG', f"1.0")
 
 
 setup(

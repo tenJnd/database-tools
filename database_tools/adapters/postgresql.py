@@ -6,7 +6,7 @@ from urllib.parse import quote_plus as urlquote
 from sqlalchemy import MetaData
 from sqlalchemy.schema import CreateSchema
 
-from cd_data.database.adapters.common import AbstractAdapter
+from database_tools.adapters.common import AbstractAdapter
 
 
 _DB_HOST = os.environ.get('DB_HOST', 'localhost')

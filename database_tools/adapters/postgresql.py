@@ -4,9 +4,9 @@ from contextlib import contextmanager
 from typing import Optional, Type
 from urllib.parse import quote_plus as urlquote
 
-from sqlalchemy import MetaData, text, inspect
-
 from cd_data.database.adapters.common import AbstractAdapter
+from sqlalchemy import MetaData
+from sqlalchemy import text, inspect
 
 _DB_HOST = os.environ.get('DB_HOST', 'localhost')
 _DB_PORT = os.environ.get('DB_PORT', 5432)

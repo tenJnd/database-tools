@@ -1,11 +1,10 @@
 """Common adapter functionality"""
-from typing import Optional
 import abc
 import os
+from typing import Optional
 
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import sessionmaker, Session
-
 
 _DB_SCHEMA = os.environ.get('DB_SCHEMA')
 
@@ -47,3 +46,23 @@ class AbstractAdapter(metaclass=abc.ABCMeta):
     def clean(self) -> None:
         """Close all database connections"""
         self._engine.dispose()
+
+    def connection_manager(self):
+        """Context manager for raw database connection management."""
+        raise NotImplementedError("Connection management is not implemented for this adapter.")
+
+    def session_manager(self):
+        """Context manager for database session management."""
+        raise NotImplementedError("Session management is not implemented for this adapter.")
+
+    def execute_sql(self, sql: str):
+        """Execute a raw SQL command."""
+        raise NotImplementedError("Executing SQL is not implemented for this adapter.")
+
+    def inspect_engine(self):
+        """Inspect the current engine."""
+        raise NotImplementedError("Engine inspector is not implemented for this adapter.")
+
+    def bulk_insert(self, the_class, dict_list):
+        """Bulk insert a list of dictionaries into the corresponding table."""
+        raise NotImplementedError("bulk insert is not implemented for this adapter.")

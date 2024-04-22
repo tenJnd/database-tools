@@ -1,13 +1,12 @@
 """PostgreSQL adapter"""
-from typing import Optional, Type
 import os
+from contextlib import contextmanager
+from typing import Optional, Type
 from urllib.parse import quote_plus as urlquote
 
-from sqlalchemy import MetaData
-from sqlalchemy.schema import CreateSchema
+from sqlalchemy import MetaData, text, inspect
 
-from database_tools.adapters.common import AbstractAdapter
-
+from cd_data.database.adapters.common import AbstractAdapter
 
 _DB_HOST = os.environ.get('DB_HOST', 'localhost')
 _DB_PORT = os.environ.get('DB_PORT', 5432)
@@ -84,10 +83,51 @@ class PostgresqlAdapter(AbstractAdapter):
 
     def init_schema(self, metadata: MetaData) -> None:
         """Initialize database schema according to given metadata"""
+        schemas = {table.schema for table in metadata.tables.values() if table.schema is not None}
 
-        # Create database schema
-        if not self._engine.dialect.has_schema(self._engine, self._schema):
-            self._engine.execute(CreateSchema(self._schema))
+        with self.connection_manager() as connection:
+            for schema in schemas:
+                if not inspect(connection).has_schema(schema):
+                    connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
 
-        # Create all defined objects
         metadata.create_all(self._engine)
+
+    @contextmanager
+    def connection_manager(self):
+        """Context manager for raw database connection management."""
+        connection = self._engine.connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    @contextmanager
+    def session_manager(self):
+        """Context manager for database session management."""
+        session = self.get_session()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def execute_sql(self, sql: str):
+        """Execute a raw SQL command."""
+        with self.session_manager() as session:
+            session.execute(text(sql))
+
+    def inspect_engine(self):
+        """Inspect the current engine."""
+        return inspect(self.engine)
+
+    def bulk_insert(self, the_class, dict_list):
+        """Bulk insert a list of dictionaries into the corresponding table."""
+        with self.session_manager() as session:
+            session.bulk_insert_mappings(the_class, dict_list)

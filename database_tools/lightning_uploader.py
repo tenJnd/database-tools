@@ -372,31 +372,31 @@ class LightningUploader:
     def upload_with_pd(self,
                        sample: pd.DataFrame,
                        replace_if_exists: Optional[bool] = False,
-                       conn=None) -> None:
+                       connection=None) -> None:
         """
         upload sample to db using pd.to_sql ->
         pd.to_sql which creates table and loads the sample
         @param sample: int
         @param replace_if_exists: bool
-        @param conn: connection to db
+        @param connection: connection to db
         @return: None
         """
         _logger.debug(f"uploading sample "
                       f"using upload_df..., rows: {len(sample)}")
         if_exists = 'replace' if replace_if_exists else 'append'
 
-        with self.get_connection(conn) as conn:
+        with self.get_connection(connection) as conn:
             sample.to_sql(name=self.table,
                           schema=self.schema,
                           con=conn,
                           if_exists=if_exists)
 
-    def upload_with_copy(self, data: pd.DataFrame, table_name: str, conn=None) -> None:
+    def upload_with_copy(self, data: pd.DataFrame, table_name: str, connection=None) -> None:
         """
         upload data using COPY FROM, this method is fast and cheap
         @param data:
         @param table_name:
-        @param conn: connection to db
+        @param connection: connection to db
         @return: None
         """
         _logger.info(f"Uploading data to {table_name} "
@@ -405,7 +405,7 @@ class LightningUploader:
         data = self.rectify_dataframe(data)
         data = data.to_dict(orient='records')
 
-        with self.get_connection(conn) as conn:
+        with self.get_connection(connection) as conn:
             cursor = conn.connection.cursor()
             # bypass for module versions (psycopg2)
             # with bug when assigning schema.table format
@@ -427,7 +427,7 @@ class LightningUploader:
     def upload_data(self,
                     data: Iterator[Dict[str, Any]],
                     replace_if_exists: Optional[bool] = False,
-                    conn=None) -> None:
+                    connection=None) -> None:
         """
         Upload dataFrame to database
         if table not exists it gets created by
@@ -435,7 +435,7 @@ class LightningUploader:
         ""and then it uses upload_with_copy to load the rest
         @param data: pd df or list of dicts
         @param replace_if_exists:
-        @param conn: connection to db
+        @param connection: connection to db
         @return: None
         """
         start = datetime.now()
@@ -450,10 +450,10 @@ class LightningUploader:
             _logger.info("table don't exists or should be rewritten "
                          "-> using sample to create table")
             sample, data = split(data, self.sample)
-            self.upload_with_pd(sample, replace_if_exists, conn)
+            self.upload_with_pd(sample, replace_if_exists, connection)
 
         if not data.empty:
-            self.upload_with_copy(data, self.table, conn)
+            self.upload_with_copy(data, self.table, connection)
 
         _logger.info(f"Data successfully uploaded, "
                      f"rows: {len(data)} | "

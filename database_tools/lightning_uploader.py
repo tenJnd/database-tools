@@ -1,5 +1,5 @@
 """
-This module is extension of utils.pd.to_
+This module is extension of utils.pd.to_sql
 and was inspired by this great article
 https://hakibenita.com/fast-load-data-python-postgresql
 It aims to load data into a database lightning-fast and very cheap (memory)
@@ -19,10 +19,10 @@ import os
 import traceback
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Optional, Any, Iterator, Dict
+from typing import Optional, Any, Iterator, Dict, List
 
 import pandas as pd
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 from database_tools.adapters.postgresql import PostgresqlAdapter
 
@@ -138,6 +138,46 @@ class StringIteratorIO(io.TextIOBase):
         return ''.join(line)
 
 
+def infer_column_type(series: pd.Series) -> str:
+    """
+    Infers the PostgresSQL column type for a given Pandas Series.
+    """
+    if pd.api.types.is_integer_dtype(series):
+        return 'INTEGER'
+    elif pd.api.types.is_float_dtype(series):
+        return 'FLOAT'
+    elif pd.api.types.is_bool_dtype(series):
+        return 'BOOLEAN'
+    elif pd.api.types.is_datetime64_any_dtype(series):
+        return 'TIMESTAMP'
+    elif pd.api.types.is_object_dtype(series):
+        # Attempt to infer more specific types within object dtype
+        if all(isinstance(val, str) for val in series.dropna()):
+            return 'TEXT'
+        elif all(isinstance(val, datetime) for val in series.dropna()):
+            return 'TIMESTAMP'
+        elif all(isinstance(val, (int, float)) for val in series.dropna()):
+            return 'NUMERIC'
+        else:
+            return 'TEXT'
+    else:
+        return 'TEXT'
+
+
+def map_dataframe_to_postgres_types(df: pd.DataFrame, columns_list: List[str]) -> dict:
+    """
+    Maps specified DataFrame column types to PostgresSQL column types.
+    """
+    type_mapping = {}
+    for column in columns_list:
+        if column in df.columns:
+            inferred_type = infer_column_type(df[column])
+            type_mapping[column] = inferred_type
+        else:
+            raise ValueError(f"Column '{column}' not found in DataFrame")
+    return type_mapping
+
+
 class LightningUploader:
     """
     Lightning-fast uploader
@@ -232,13 +272,26 @@ class LightningUploader:
 
         return col_list, col_types_clean
 
-    def rectify_dataframe(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+    def create_columns_in_database(self, columns_w_db_types: Dict[str, str], connection=None):
+        _logger.info(f'Adding columns to database... \n {columns_w_db_types}')
+        with self.get_connection(connection) as conn:
+            cursor = conn.connection.cursor()
+            alter_statements = []
+            for col, dtype in columns_w_db_types.items():
+                alter_statements.append(f'ADD COLUMN {col} {dtype}')
+            stmt = f'ALTER TABLE {self.schema}.{self.table} ' + ', '.join(alter_statements) + ';'
+            cursor.execute(stmt)
+            conn.connection.commit()
+        _logger.info(f'Columns added database... \n {columns_w_db_types}')
+
+    def rectify_dataframe(self, dataframe: pd.DataFrame, create_cols_in_db: bool = False) -> pd.DataFrame:
         """
         Add or drop columns to/from input DataFrame.
         Database table's columns are the source of truth here.
          - col not in db -> drop from input df
          - col in db but not in input -> create columns in df with NaN
         @param dataframe:
+        @param create_cols_in_db: whether to create columns that are not in db but in df
         @return: pd.DataFrame[columns from db]
         """
         db_columns_l, db_columns_and_types = self.get_columns()
@@ -246,14 +299,6 @@ class LightningUploader:
 
         columns_not_in_df = [x for x in db_columns_l if x not in df_columns_l]
         columns_not_in_db = [x for x in df_columns_l if x not in db_columns_l]
-
-        if columns_not_in_db:
-            _logger.warning(f"You are trying to upload columns "
-                            f"that are no in the database \n"
-                            f"table: {self.schema}.{self.table}\n"
-                            f"columns: {columns_not_in_db}, "
-                            f"add them into the database!"
-                            )
 
         dataframe[columns_not_in_df] = None
         try:
@@ -264,8 +309,24 @@ class LightningUploader:
                 f"\n{traceback.format_exc()}"
             )
 
-        self.columns = db_columns_l
-        return dataframe[db_columns_l]
+        if create_cols_in_db and columns_not_in_db:
+            db_columns_not_in_df_w_db_mapped_types = map_dataframe_to_postgres_types(
+                dataframe,
+                columns_not_in_db
+            )
+            self.columns = db_columns_l + columns_not_in_db
+        else:
+            if columns_not_in_db:
+                _logger.warning(f"You are trying to upload columns "
+                                f"that are no in the database \n"
+                                f"table: {self.schema}.{self.table}\n"
+                                f"columns: {columns_not_in_db}, "
+                                f"add them into the database!"
+                                )
+            db_columns_not_in_df_w_db_mapped_types = None
+            self.columns = db_columns_l
+
+        return dataframe[self.columns], db_columns_not_in_df_w_db_mapped_types
 
     def create_tmp_table(self, conflict_columns: list) -> None:
         _logger.info(f"Creating empty tmp table: {self.upsert_tmp_table}")
@@ -285,11 +346,11 @@ class LightningUploader:
         """ for x in conflict_columns]
 
         with self.database.engine.begin() as con:
-            con.execute(sql_drop)
-            con.execute(sql_create)
+            con.execute(text(sql_drop))
+            con.execute(text(sql_create))
             for sql_index in sql_index_list:
                 _logger.info(f"{sql_index}")
-                con.execute(sql_index)
+                con.execute(text(sql_index))
 
         _logger.debug("Tmp table created")
 
@@ -341,7 +402,7 @@ class LightningUploader:
         limit 1
         """
 
-        return conn.execute(sql_stmt).fetchone()
+        return conn.execute(text(sql_stmt)).fetchone()
 
     def delete(self, sql_condition: str) -> None:
         """
@@ -359,11 +420,11 @@ class LightningUploader:
         {sql_condition}
         """
 
-        with self.database.engine.connect() as conn:
+        with self.database.connection_manager() as conn:
             if self.table_exists(self.table) and self.check_record_exists(sql_condition, conn):
                 _logger.info("records exists -> "
                              f"performing DELETE statement:\n{delete_stmt}")
-                conn.execute(delete_stmt)
+                conn.execute(text(delete_stmt))
                 _logger.info("records DELETED!")
             else:
                 _logger.info("No records found within "
@@ -389,20 +450,28 @@ class LightningUploader:
             sample.to_sql(name=self.table,
                           schema=self.schema,
                           con=conn,
-                          if_exists=if_exists)
+                          if_exists=if_exists,
+                          index=False)
 
-    def upload_with_copy(self, data: pd.DataFrame, table_name: str, connection=None) -> None:
+    def upload_with_copy(self, data: pd.DataFrame,
+                         table_name: str,
+                         connection=None,
+                         create_columns_in_db: bool = False) -> None:
         """
         upload data using COPY FROM, this method is fast and cheap
         @param data:
         @param table_name:
         @param connection: connection to db
+        @param create_columns_in_db: whether to create columns that are not in db but in df
         @return: None
         """
         _logger.info(f"Uploading data to {table_name} "
                      f"using copy, rows: {len(data)} ...")
 
-        data = self.rectify_dataframe(data)
+        data, columns_not_in_db = self.rectify_dataframe(data, create_columns_in_db)
+        if create_columns_in_db and columns_not_in_db:
+            self.create_columns_in_database(columns_not_in_db)
+
         data = data.to_dict(orient='records')
 
         with self.get_connection(connection) as conn:
@@ -427,7 +496,8 @@ class LightningUploader:
     def upload_data(self,
                     data: Iterator[Dict[str, Any]],
                     replace_if_exists: Optional[bool] = False,
-                    connection=None) -> None:
+                    connection=None,
+                    create_columns_in_db: bool = False) -> None:
         """
         Upload dataFrame to database
         if table not exists it gets created by
@@ -436,6 +506,7 @@ class LightningUploader:
         @param data: pd df or list of dicts
         @param replace_if_exists:
         @param connection: connection to db
+        @param create_columns_in_db: whether to create columns that are not in db but in df
         @return: None
         """
         start = datetime.now()
@@ -453,7 +524,7 @@ class LightningUploader:
             self.upload_with_pd(sample, replace_if_exists, connection)
 
         if not data.empty:
-            self.upload_with_copy(data, self.table, connection)
+            self.upload_with_copy(data, self.table, connection, create_columns_in_db)
 
         _logger.info(f"Data successfully uploaded, "
                      f"rows: {len(data)} | "
@@ -466,24 +537,21 @@ class LightningUploader:
         @return:
         """
         update_stmt, insert_stmt = self.build_u_i_queries(conflict_columns)
+        drop_tmp_table_stmt = f"drop table if exists {self.schema}.{self.upsert_tmp_table};"
 
         with self.database.engine.begin() as con:
             save_point = con.begin_nested()
             _logger.info(f"Updating table {self.table}"
                          f" with {self.upsert_tmp_table}")
-            con.execute(update_stmt)
+            con.execute(text(update_stmt))
 
             _logger.info(f"Inserting to table {self.table}"
                          f" from {self.upsert_tmp_table}")
-            con.execute(insert_stmt)
+            con.execute(text(insert_stmt))
 
             _logger.info(f"Upsert SUCCESS -> dropping tmp table "
                          f"{self.upsert_tmp_table}")
-            con.execute(f"""
-                        drop table if exists
-                        {self.schema}.{self.upsert_tmp_table};
-                        """
-                        )
+            con.execute(text(drop_tmp_table_stmt))
             save_point.commit()
 
     def upsert_data(self, data: Iterator[Dict[str, Any]],

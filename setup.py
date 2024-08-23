@@ -22,7 +22,6 @@ setup(
     python_requires='>=3.6',
     install_requires=[
         'SQLAlchemy>=1.3.12',
-        'regex==2020.1.8',
         'pandas',
         'numpy>=1.17.3',
         'psycopg2-binary==2.9.3',

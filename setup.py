@@ -25,6 +25,7 @@ setup(
         'pandas',
         'numpy>=1.24.4',
         'psycopg2-binary==2.9.3',
-        'pybigquery==0.4.15'
+        'pybigquery==0.4.15',
+        'regex>=2020.1.8'
     ],
 )

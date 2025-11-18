@@ -26,7 +26,7 @@ setup(
         'numpy',
         'psycopg2-binary==2.9.3',
         'pybigquery==0.4.15',
-        'regex>=2020.1.8'
+        'regex>=2020.1.8',
         'asyncpg>=0.30.0'
     ],
 )

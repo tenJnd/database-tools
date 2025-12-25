@@ -168,15 +168,27 @@ class AsyncPostgresqlAdapter:
         )
 
         connect_args: Dict[str, Any] = {}
+        # Supabase transaction pooler / PgBouncer transaction mode:
+        # prepared statements are not supported reliably → disable asyncpg statement cache
+        connect_args.setdefault(
+            "statement_cache_size",
+            int(os.environ.get("DB_STATEMENT_CACHE_SIZE", "0")),
+        )
+
         if ssl_required:
             connect_args['ssl'] = ssl.create_default_context()
         if application_name:
             connect_args.setdefault('server_settings', {})['application_name'] = str(application_name)
 
+        # merge user-provided connect_args (if any)
+        user_connect_args = kwargs.pop("connect_args", None) or {}
+        connect_args.update(user_connect_args)
+
         self._engine: AsyncEngine = create_async_engine(
             dsn,
             echo=echo,
             connect_args=connect_args,
+            pool_pre_ping=True,
             **kwargs,  # e.g., pool_size, max_overflow, pool_recycle
         )
         self._session_cls = async_sessionmaker(bind=self._engine, expire_on_commit=False)

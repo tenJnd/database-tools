@@ -179,7 +179,7 @@ class AsyncPostgresqlAdapter:
         if application_name:
             connect_args.setdefault('server_settings', {})['application_name'] = str(application_name)
 
-        # merge user-provided connect_args (if any)
+        # merge user-provided connect_args
         user_connect_args = kwargs.pop("connect_args", None) or {}
         user_connect_args.pop("statement_cache_size", None)
         user_connect_args.pop("prepared_statement_name_func", None)

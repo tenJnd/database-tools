@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from typing import Optional, Dict, Any, List
 from typing import Type
 from urllib.parse import quote_plus as urlquote
+from uuid import uuid4
 
 from sqlalchemy import MetaData, text, inspect
 from sqlalchemy.dialects.postgresql import insert
@@ -170,10 +171,8 @@ class AsyncPostgresqlAdapter:
         connect_args: Dict[str, Any] = {}
         # Supabase transaction pooler / PgBouncer transaction mode:
         # prepared statements are not supported reliably → disable asyncpg statement cache
-        connect_args.setdefault(
-            "statement_cache_size",
-            int(os.environ.get("DB_STATEMENT_CACHE_SIZE", "0")),
-        )
+        connect_args["statement_cache_size"] = 0
+        connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid4()}__"
 
         if ssl_required:
             connect_args['ssl'] = ssl.create_default_context()
@@ -182,6 +181,8 @@ class AsyncPostgresqlAdapter:
 
         # merge user-provided connect_args (if any)
         user_connect_args = kwargs.pop("connect_args", None) or {}
+        user_connect_args.pop("statement_cache_size", None)
+        user_connect_args.pop("prepared_statement_name_func", None)
         connect_args.update(user_connect_args)
 
         self._engine: AsyncEngine = create_async_engine(

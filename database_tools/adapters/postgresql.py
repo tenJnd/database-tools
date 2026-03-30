@@ -172,7 +172,7 @@ class AsyncPostgresqlAdapter:
         # Supabase transaction pooler / PgBouncer transaction mode:
         # prepared statements are not supported reliably → disable asyncpg statement cache
         connect_args["statement_cache_size"] = 0
-        connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid4()}__"
+        # connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid4()}__"
 
         if ssl_required:
             connect_args['ssl'] = ssl.create_default_context()
@@ -182,7 +182,7 @@ class AsyncPostgresqlAdapter:
         # merge user-provided connect_args
         user_connect_args = kwargs.pop("connect_args", None) or {}
         user_connect_args.pop("statement_cache_size", None)
-        user_connect_args.pop("prepared_statement_name_func", None)
+        # user_connect_args.pop("prepared_statement_name_func", None)
         connect_args.update(user_connect_args)
 
         self._engine: AsyncEngine = create_async_engine(

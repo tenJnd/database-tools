@@ -21,7 +21,7 @@ setup(
     packages=find_packages(exclude=('tests', 'docs')),
     python_requires='>=3.6',
     install_requires=[
-        'SQLAlchemy>=1.3.12',
+        'SQLAlchemy[asyncio]>=1.3.12,<2.2',
         'pandas',
         'numpy',
         'psycopg2-binary==2.9.3',
